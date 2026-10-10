@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+# User-supplied captures, installation files and local reverse-engineering output.
+*.pcap
+*.pcapng
+*.zip
+*.tar.gz
+*.asar
+appe/
+Chinatelecom_JSPortal/
+analysis/
+# Local account/session configuration.
+credentials*.json
+client-id
+
+# C build products and local account files.
+cclient/esurfing
+cclient/tests/driver
+cclient/*.dSYM/
+cclient/tests/*.dSYM/
+credentials*.conf
+
+.build/
