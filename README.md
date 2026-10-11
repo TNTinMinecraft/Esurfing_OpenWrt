@@ -23,7 +23,7 @@
 
 ## 安装与使用
 
-从本仓库 [Releases](https://github.com/TNTinMinecraft/Esurfing_OpenWrt/releases) 下载手动工作流生成的文件，按 [安装说明](docs/install.md) 校验并安装。当前工作流使用 **OpenWrt 25.12.0 / musl**，一次构建 x86_64、ARMv7、两种 ARM64、大小端 MIPS/MIPS64 和 RISC-V 64，共九个 SDK 目标。各目标以独立压缩包发布，内含未签名 APK 及校验文件；具体包架构和 SDK 对应关系见 [构建矩阵](docs/building.md)。请选择与设备匹配的一个压缩包，校验后通过 `apk add --allow-untrusted` 安装。
+从本仓库 [Releases](https://github.com/TNTinMinecraft/Esurfing_OpenWrt/releases) 下载手动工作流生成的文件，按 [安装说明](docs/install.md) 校验并安装。当前工作流使用 **OpenWrt 25.12.0 / musl**，一次构建 x86_64、ARMv7、两种 ARM64、大小端 MIPS/MIPS64 和 RISC-V 64，共九个 SDK 目标。各目标同时发布独立 `.apk` 和完整压缩包（内含未签名 APK 及校验文件）；具体包架构和 SDK 对应关系见 [构建矩阵](docs/building.md)。请选择与设备匹配的一个压缩包，校验后通过 `apk add --allow-untrusted` 安装。
 
 macOS/Linux 用户可下载 `esurfing-macos-arm64.tar.gz`、`esurfing-macos-x86_64.tar.gz`、`esurfing-linux-arm64.tar.gz` 或 `esurfing-linux-x86_64.tar.gz`，安装匹配的运行库后直接执行压缩包中的 `esurfing`，见 [原生程序说明](docs/native.md)。
 
@@ -39,7 +39,7 @@ esurfing --interface eth1
 
 ## 构建与发布
 
-GitHub Actions **仅支持手动触发**，普通 push、tag push、Pull Request 均不会自动运行。将源码和 tag 手动推送后，在 Actions 中运行 **Build and release APKs and binaries**，输入已有 tag；九个 OpenWrt 目标和四个原生程序目标全部构建成功后汇总生成同一个 Release，或勾选 `draft` 保存为草稿。完整步骤见 [构建与发布](docs/building.md)。
+GitHub Actions **仅支持手动触发**，普通 push、tag push、Pull Request 均不会自动运行。将源码和 tag 手动推送后，在 Actions 中运行 **Build and release APKs and binaries**，输入已有 tag；九个 OpenWrt 目标和四个原生程序目标全部构建成功后汇总生成同一个 Release，或勾选 `draft` 保存为草稿。构建使用 SDK 依赖缓存和按 CPU 核数并行。即使其他平台失败导致 Release 跳过，成功架构的包仍可在该次运行的 Artifacts 下载。完整步骤见 [构建与发布](docs/building.md)。
 
 工作流不包含项目测试步骤。本次迁移未执行编译、测试、推送、Action 或 Release 发布；实际构建结果以之后手动运行的工作流为准。
 

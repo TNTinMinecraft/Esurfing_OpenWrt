@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Workflow build API: 2
 # Build unsigned packages with an unpacked Linux OpenWrt APK SDK. No test targets.
 set -euo pipefail
 
@@ -15,13 +16,28 @@ output_dir=$(cd -- "$2" && pwd)
     echo "Output directory must be empty: $output_dir" >&2
     exit 2
 }
-jobs=${JOBS:-2}
+jobs=${JOBS:-$(nproc)}
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || { echo "JOBS must be a positive integer" >&2; exit 2; }
 
 cd "$sdk_dir"
-# Keep the feeds/revisions shipped by the chosen SDK; do not switch to master.
-./scripts/feeds update -a
-./scripts/feeds install -a
+# An exact CI cache contains the SDK, pinned feeds and compiled dependencies.
+# Local builds refresh the required feeds unless explicitly reusing that cache.
+if [[ ${REUSE_SDK:-false} == true ]]; then
+    [[ -n ${SDK_SHA256:-} && -f .esurfing-sdk-ready &&
+       $(cat .esurfing-sdk-ready) == "$SDK_SHA256" ]] || {
+        echo "SDK cache marker mismatch; remove the cache and rebuild." >&2
+        exit 1
+    }
+    echo 'Reusing SDK feeds and compiled dependencies.'
+else
+    # Keep the revisions shipped by the SDK; routing/telephony/video are unused.
+    ./scripts/feeds update base packages luci
+    # feeds install recursively installs runtime and build dependency recipes.
+    ./scripts/feeds install libcurl liblzma libexpat libgcc luci-base \
+        rpcd-mod-ucode ucode-mod-fs ucode-mod-uci ucode-mod-ubus
+fi
+# Replace project files so deleted source/assets cannot survive a cached SDK.
+rm -rf package/esurfing-c package/luci-app-esurfing-c
 mkdir -p package/esurfing-c/src package/esurfing-c/files package/luci-app-esurfing-c
 cp "$repo_dir/cclient/openwrt/Makefile" package/esurfing-c/Makefile
 cp "$repo_dir"/cclient/src/* package/esurfing-c/src/
@@ -69,7 +85,11 @@ done
 # Regenerate the two packages so a reused SDK cannot export previously signed
 # copies. OpenWrt 25.12's targeted package builds produce unsigned APKs.
 make package/esurfing-c/clean package/luci-app-esurfing-c/clean
-make -j"$jobs" package/esurfing-c/compile V=s
+# Remove any older package versions left by a reused local SDK as well.
+if [[ -d bin/packages ]]; then
+    find bin/packages -type f \( -name 'esurfing-c-*.apk' -o -name 'luci-app-esurfing-c-*.apk' \) -delete
+fi
+# LuCI depends on esurfing-c: one dependency traversal builds both packages.
 make -j"$jobs" package/luci-app-esurfing-c/compile V=s
 
 for name in esurfing-c luci-app-esurfing-c; do
@@ -88,6 +108,8 @@ cp "$repo_dir/LICENSE" "$output_dir/LICENSE"
     printf 'Build time (UTC): %s\n' "$(date -u +%FT%TZ)"
     printf 'SDK archive: %s\n' "${SDK_ARCHIVE:-locally supplied SDK}"
     printf 'SDK SHA256: %s\n' "${SDK_SHA256:-not supplied}"
+    printf 'SDK cache reused: %s\n' "${REUSE_SDK:-false}"
+    printf 'Parallel jobs: %s\n' "$jobs"
     printf 'Package architecture: %s\n' "$package_arch"
     printf 'OpenWrt target: %s/%s\n' "$target_board" "$target_subtarget"
     printf 'Package signing: unsigned (install with apk add --allow-untrusted)\n'
@@ -106,4 +128,7 @@ cp "$repo_dir/LICENSE" "$output_dir/LICENSE"
     cd "$output_dir"
     sha256sum -- *.apk INSTALL.md LICENSE BUILD-INFO.txt > SHA256SUMS
 )
+if [[ -n ${SDK_SHA256:-} ]]; then
+    printf '%s\n' "$SDK_SHA256" > .esurfing-sdk-ready
+fi
 printf 'Release files: %s\n' "$output_dir"

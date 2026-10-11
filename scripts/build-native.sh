@@ -42,9 +42,18 @@ if [[ "$platform" == macos ]]; then
     xz_prefix=$(brew --prefix xz)
     expat_prefix=$(brew --prefix expat)
     export MACOSX_DEPLOYMENT_TARGET=15.0
-    compiler=$(xcrun --find clang)
+    # Invoking Xcode's clang by absolute path does not select an SDK sysroot.
+    # Resolve the compiler and SDK together, then pass the SDK explicitly so
+    # standard headers (e.g. signal.h) and system libraries are found on CI.
+    export SDKROOT
+    SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+    [[ -f "$SDKROOT/usr/include/signal.h" ]] || {
+        echo "macOS SDK is missing signal.h: $SDKROOT" >&2
+        exit 1
+    }
+    compiler=$(xcrun --sdk macosx --find clang)
     build_args=("CC=$compiler"
-        "CPPFLAGS=-Isrc -I$curl_prefix/include -I$xz_prefix/include -I$expat_prefix/include"
+        "CPPFLAGS=-Isrc -isysroot \"$SDKROOT\" -I$curl_prefix/include -I$xz_prefix/include -I$expat_prefix/include"
         "LDLIBS=$curl_prefix/lib/libcurl.dylib $xz_prefix/lib/liblzma.dylib $expat_prefix/lib/libexpat.dylib")
 else
     compiler=/usr/bin/gcc
@@ -79,6 +88,8 @@ cp "$repo_dir/LICENSE" "$output_dir/LICENSE"
     file "$output_dir/esurfing"
     if [[ "$platform" == macos ]]; then
         printf '\nmacOS deployment target: %s\n' "$MACOSX_DEPLOYMENT_TARGET"
+        printf 'macOS SDK path: %s\n' "$SDKROOT"
+        printf 'macOS SDK version: %s\n' "$(xcrun --sdk macosx --show-sdk-version)"
         sw_vers
         printf '\nDynamic library paths:\n'
         otool -L "$output_dir/esurfing"

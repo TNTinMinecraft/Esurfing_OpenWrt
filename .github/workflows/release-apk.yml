@@ -48,6 +48,11 @@ jobs:
         run: |
           git check-ref-format "refs/tags/$RELEASE_TAG"
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          # The workflow may be selected from main while tag points to old scripts.
+          grep -Fqx '# Workflow build API: 2' scripts/build-openwrt.sh || {
+            echo '::error::This tag uses an older build script. Commit the updated scripts and create a new release tag.'
+            exit 1
+          }
 
   build:
     name: Build ${{ matrix.arch }} (${{ matrix.target }}/${{ matrix.subtarget }})
@@ -127,18 +132,39 @@ jobs:
             python3-pyelftools rsync swig unzip zlib1g-dev file wget curl \
             xz-utils zstd patch perl pkgconf subversion time
 
+      - name: Compute the SDK cache key
+        id: sdk-key
+        env:
+          RECIPE_HASH: ${{ hashFiles('scripts/build-openwrt.sh', 'cclient/openwrt/Makefile', 'luci-app-esurfing-c/Makefile', '.github/workflows/release-apk.yml') }}
+        run: |
+          # Deliberately omit C/UI sources: they are always replaced and rebuilt.
+          # SDK digest pins the toolchain and the SDK's feed commit configuration.
+          echo "key=esurfing-sdk-v1-${ImageOS}-${ImageVersion}-${SDK_SHA256}-${RECIPE_HASH}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the compiled SDK
+        id: sdk-cache
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/sdk
+          key: ${{ steps.sdk-key.outputs.key }}
+          # No fallback keys: never mix SDKs, recipes, or runner images.
+
       - name: Download and verify the official SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: |
           curl --fail --location --retry 3 \
             "$SDK_BASE_URL/$SDK_ARCHIVE" --output "$RUNNER_TEMP/$SDK_ARCHIVE"
           cd "$RUNNER_TEMP"
           printf '%s  %s\n' "$SDK_SHA256" "$SDK_ARCHIVE" | sha256sum --check --strict
+          # A failed cache extraction may have left a partial directory.
+          rm -rf "$RUNNER_TEMP/sdk"
           mkdir sdk
           tar --zstd -xf "$SDK_ARCHIVE" -C sdk --strip-components=1
 
       - name: Build unsigned APK packages
         env:
-          JOBS: '2'
+          REUSE_SDK: ${{ steps.sdk-cache.outputs.cache-hit == 'true' }}
         run: |
           bash scripts/build-openwrt.sh "$RUNNER_TEMP/sdk" "$GITHUB_WORKSPACE/dist"
 
@@ -151,14 +177,31 @@ jobs:
           sha256sum --check SHA256SUMS
           tar -czf "$RUNNER_TEMP/release-files/$bundle.tar.gz" \
             ./*.apk SHA256SUMS BUILD-INFO.txt INSTALL.md LICENSE
+          # Unique asset names preserve each target's dependency metadata.
+          # Renaming the file does not change the APK's internal package name/ABI.
+          for apk in ./*.apk; do
+            filename=$(basename "$apk" .apk)
+            cp "$apk" "$RUNNER_TEMP/release-files/${filename}-${EXPECTED_TARGET_BOARD}-${EXPECTED_TARGET_SUBTARGET}-${EXPECTED_PACKAGE_ARCH}.apk"
+          done
+          cd "$RUNNER_TEMP/release-files"
+          sha256sum -- *.apk "$bundle.tar.gz" > "$bundle.SHA256SUMS"
 
       - name: Upload this target's release bundle
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-apk-${{ matrix.target }}-${{ matrix.subtarget }}-${{ matrix.arch }}
-          path: ${{ runner.temp }}/release-files/*.tar.gz
+          path: ${{ runner.temp }}/release-files/*
+          compression-level: 0
           if-no-files-found: error
           retention-days: 14
+
+      - name: Save the compiled SDK for subsequent releases
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/sdk
+          key: ${{ steps.sdk-key.outputs.key }}
 
   native:
     name: Build ${{ matrix.platform }} ${{ matrix.arch }} binary
@@ -256,7 +299,9 @@ jobs:
           cp docs/native.md dist/NATIVE.md
           cp LICENSE dist/LICENSE
           cd dist
-          sha256sum -- *.tar.gz INSTALL.md BUILDING.md NATIVE.md LICENSE > SHA256SUMS
+          # Verify the per-target manifests before making the combined manifest.
+          for manifest in *.SHA256SUMS; do sha256sum --check "$manifest"; done
+          sha256sum -- *.tar.gz *.apk *.SHA256SUMS INSTALL.md BUILDING.md NATIVE.md LICENSE > SHA256SUMS
 
       - name: Publish a release for the built tag
         env:
@@ -284,6 +329,7 @@ jobs:
             printf 'Source commit: `%s`\n\n' "$SOURCE_COMMIT"
             printf 'Download the bundle matching your OS and architecture. Each bundle includes checksums and build information.\n'
             printf 'OpenWrt: install unsigned APKs with apk add --allow-untrusted (INSTALL.md).\n'
+            printf 'OpenWrt APKs are also attached directly with target/architecture suffixes; select matching core and LuCI files.\n'
             printf 'macOS/Linux: extract the esurfing executable and install its runtime libraries (NATIVE.md).\n'
             printf 'Project tests were not run.\n\n'
             printf 'Available bundles:\n\n'
@@ -293,4 +339,30 @@ jobs:
           if [[ "$DRAFT" == true ]]; then options+=(--draft); fi
           # gh release create fails if a release already exists; never overwrite it.
           gh release create "$RELEASE_TAG" "${options[@]}" \
-            ./*.tar.gz SHA256SUMS INSTALL.md BUILDING.md NATIVE.md LICENSE
+            ./*.tar.gz ./*.apk ./*.SHA256SUMS SHA256SUMS INSTALL.md BUILDING.md NATIVE.md LICENSE
+
+  summary:
+    name: Build and release summary
+    if: always()
+    needs: [source, build, native, release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Explain artifact and release status
+        env:
+          SOURCE_RESULT: ${{ needs.source.result }}
+          OPENWRT_RESULT: ${{ needs.build.result }}
+          NATIVE_RESULT: ${{ needs.native.result }}
+          RELEASE_RESULT: ${{ needs.release.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            printf '| Source | OpenWrt APKs | Native binaries | Release |\n'
+            printf '| --- | --- | --- | --- |\n'
+            printf '| %s | %s | %s | %s |\n\n' "$SOURCE_RESULT" "$OPENWRT_RESULT" "$NATIVE_RESULT" "$RELEASE_RESULT"
+            printf 'Successful targets upload files independently. Download them from [this run’s Artifacts](%s#artifacts).\n\n' "$RUN_URL"
+            printf 'OpenWrt artifacts contain standalone .apk files and a complete .tar.gz bundle. Install matching unsigned APKs with --allow-untrusted.\n\n'
+            if [[ "$RELEASE_RESULT" == skipped ]]; then
+              printf 'Release was skipped because a required job did not succeed. This does not mean that successful OpenWrt jobs failed to produce APKs.\n'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

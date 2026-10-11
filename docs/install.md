@@ -4,6 +4,10 @@
 
 从 GitHub Release 下载与设备匹配的一个 `esurfing-openwrt-25.12.0-<target>-<subtarget>-<arch>.tar.gz` 及总 `SHA256SUMS`。每个压缩包包含核心 APK、LuCI APK、内部 `SHA256SUMS`、`BUILD-INFO.txt`、`INSTALL.md` 和 `LICENSE`；无需下载所有架构。
 
+也可直接下载 Release 的独立 `.apk` 附件，核心包和 LuCI 包应选择相同的 `<target>-<subtarget>-<arch>` 后缀。独立 APK 的文件名带目标后缀，内部包信息不变；按总 `SHA256SUMS` 中对应文件行校验，再使用下方 `apk add --allow-untrusted` 安装。只在目录中放置所需目标的 APK，避免通配符选中其他架构。
+
+若没有 Release，请进入对应 Actions 运行的 **Artifacts** 下载 `openwrt-apk-<target>-<subtarget>-<arch>`。其他平台失败可能阻止 Release 发布，但不影响成功目标的 Artifact。新工作流的 Artifact 还附带该目标的 `esurfing-openwrt-….SHA256SUMS`，解压后用 `sha256sum -c <该清单文件名>` 校验独立 APK 和压缩包。旧工作流的 Artifact 解压后还有一层 `.tar.gz`，继续解压即可得到 APK。
+
 工作流覆盖 x86_64、ARMv7、两种 ARM64、大小端 MIPS/MIPS64 和 RISC-V 64，均基于 OpenWrt 25.12.0 / musl。具体 SDK/包架构对应表见 Release 附件 `BUILDING.md`。用 `ubus call system board` 查看设备 target，并用 `apk --print-arch` 查看包架构；应同时核对固件版本、具体架构及软件源。`mips64_mips64r2` 并不是所有 MIPS64 设备的通用包。
 
 以下以 `ramips/mt7621` 的 `mipsel_24kc` 为例，在存放下载文件的目录执行，其他设备替换压缩包文件名：
