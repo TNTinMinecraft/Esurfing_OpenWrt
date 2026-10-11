@@ -49,7 +49,7 @@ jobs:
           git check-ref-format "refs/tags/$RELEASE_TAG"
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           # The workflow may be selected from main while tag points to old scripts.
-          grep -Fqx '# Workflow build API: 2' scripts/build-openwrt.sh || {
+          grep -Fqx '# Workflow build API: 3' scripts/build-openwrt.sh || {
             echo '::error::This tag uses an older build script. Commit the updated scripts and create a new release tag.'
             exit 1
           }
@@ -113,6 +113,8 @@ jobs:
       SDK_BASE_URL: https://downloads.openwrt.org/releases/25.12.0/targets/${{ matrix.target }}/${{ matrix.subtarget }}
       SDK_ARCHIVE: ${{ matrix.sdk }}
       SDK_SHA256: ${{ matrix.sha256 }}
+      # The LuCI payload is noarch; build it once alongside the x86 core.
+      BUILD_LUCI: ${{ matrix.arch == 'x86_64' }}
       EXPECTED_PACKAGE_ARCH: ${{ matrix.arch }}
       EXPECTED_TARGET_BOARD: ${{ matrix.target }}
       EXPECTED_TARGET_SUBTARGET: ${{ matrix.subtarget }}
@@ -139,7 +141,7 @@ jobs:
         run: |
           # Deliberately omit C/UI sources: they are always replaced and rebuilt.
           # SDK digest pins the toolchain and the SDK's feed commit configuration.
-          echo "key=esurfing-sdk-v1-${ImageOS}-${ImageVersion}-${SDK_SHA256}-${RECIPE_HASH}" >> "$GITHUB_OUTPUT"
+          echo "key=esurfing-sdk-v1-${ImageOS}-${ImageVersion}-${SDK_SHA256}-luci-${BUILD_LUCI}-${RECIPE_HASH}" >> "$GITHUB_OUTPUT"
 
       - name: Restore the compiled SDK
         id: sdk-cache
@@ -168,25 +170,27 @@ jobs:
         run: |
           bash scripts/build-openwrt.sh "$RUNNER_TEMP/sdk" "$GITHUB_WORKSPACE/dist"
 
-      - name: Bundle packages for this target
+      - name: Prepare APKs and build metadata
         run: |
-          # Keep each target's APKs and manifest together without filename collisions.
-          bundle="esurfing-openwrt-${OPENWRT_VERSION}-${EXPECTED_TARGET_BOARD}-${EXPECTED_TARGET_SUBTARGET}-${EXPECTED_PACKAGE_ARCH}"
+          target_id="openwrt-${OPENWRT_VERSION}-${EXPECTED_TARGET_BOARD}-${EXPECTED_TARGET_SUBTARGET}-${EXPECTED_PACKAGE_ARCH}"
           mkdir -p "$RUNNER_TEMP/release-files"
           cd dist
           sha256sum --check SHA256SUMS
-          tar -czf "$RUNNER_TEMP/release-files/$bundle.tar.gz" \
-            ./*.apk SHA256SUMS BUILD-INFO.txt INSTALL.md LICENSE
-          # Unique asset names preserve each target's dependency metadata.
-          # Renaming the file does not change the APK's internal package name/ABI.
-          for apk in ./*.apk; do
+          for apk in ./esurfing-c-*.apk; do
             filename=$(basename "$apk" .apk)
             cp "$apk" "$RUNNER_TEMP/release-files/${filename}-${EXPECTED_TARGET_BOARD}-${EXPECTED_TARGET_SUBTARGET}-${EXPECTED_PACKAGE_ARCH}.apk"
           done
+          if [[ "$BUILD_LUCI" == true ]]; then
+            for apk in ./luci-app-esurfing-c-*.apk; do
+              filename=$(basename "$apk" .apk)
+              cp "$apk" "$RUNNER_TEMP/release-files/${filename}-noarch.apk"
+            done
+          fi
+          cp BUILD-INFO.txt "$RUNNER_TEMP/release-files/$target_id.BUILD-INFO.txt"
           cd "$RUNNER_TEMP/release-files"
-          sha256sum -- *.apk "$bundle.tar.gz" > "$bundle.SHA256SUMS"
+          sha256sum -- *.apk *.BUILD-INFO.txt > "$target_id.SHA256SUMS"
 
-      - name: Upload this target's release bundle
+      - name: Upload APKs and build metadata
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-apk-${{ matrix.target }}-${{ matrix.subtarget }}-${{ matrix.arch }}
@@ -278,7 +282,7 @@ jobs:
           ref: ${{ needs.source.outputs.commit }}
           persist-credentials: false
 
-      - name: Download OpenWrt target bundles
+      - name: Download OpenWrt APKs and metadata
         uses: actions/download-artifact@v4
         with:
           pattern: openwrt-apk-*
@@ -301,7 +305,7 @@ jobs:
           cd dist
           # Verify the per-target manifests before making the combined manifest.
           for manifest in *.SHA256SUMS; do sha256sum --check "$manifest"; done
-          sha256sum -- *.tar.gz *.apk *.SHA256SUMS INSTALL.md BUILDING.md NATIVE.md LICENSE > SHA256SUMS
+          sha256sum -- *.tar.gz *.apk *.BUILD-INFO.txt *.SHA256SUMS INSTALL.md BUILDING.md NATIVE.md LICENSE > SHA256SUMS
 
       - name: Publish a release for the built tag
         env:
@@ -327,19 +331,19 @@ jobs:
           {
             printf 'OpenWrt %s APKs + macOS/Linux ARM64 and x86_64 executables\n\n' "$OPENWRT_VERSION"
             printf 'Source commit: `%s`\n\n' "$SOURCE_COMMIT"
-            printf 'Download the bundle matching your OS and architecture. Each bundle includes checksums and build information.\n'
+            printf 'Download the core APK matching your OpenWrt target, or the native bundle matching your OS/CPU.\n'
             printf 'OpenWrt: install unsigned APKs with apk add --allow-untrusted (INSTALL.md).\n'
-            printf 'OpenWrt APKs are also attached directly with target/architecture suffixes; select matching core and LuCI files.\n'
+            printf 'LuCI: the single noarch APK is shared by all supported OpenWrt architectures with compatible LuCI/rpcd/ucode dependencies.\n'
             printf 'macOS/Linux: extract the esurfing executable and install its runtime libraries (NATIVE.md).\n'
             printf 'Project tests were not run.\n\n'
-            printf 'Available bundles:\n\n'
-            for bundle in *.tar.gz; do printf -- '- `%s`\n' "$bundle"; done
+            printf 'Available packages and native bundles:\n\n'
+            for bundle in *.apk *.tar.gz; do printf -- '- `%s`\n' "$bundle"; done
           } > "$RUNNER_TEMP/release-notes.md"
           options=(--verify-tag --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md")
           if [[ "$DRAFT" == true ]]; then options+=(--draft); fi
           # gh release create fails if a release already exists; never overwrite it.
           gh release create "$RELEASE_TAG" "${options[@]}" \
-            ./*.tar.gz ./*.apk ./*.SHA256SUMS SHA256SUMS INSTALL.md BUILDING.md NATIVE.md LICENSE
+            ./*.tar.gz ./*.apk ./*.BUILD-INFO.txt ./*.SHA256SUMS SHA256SUMS INSTALL.md BUILDING.md NATIVE.md LICENSE
 
   summary:
     name: Build and release summary
@@ -361,7 +365,7 @@ jobs:
             printf '| --- | --- | --- | --- |\n'
             printf '| %s | %s | %s | %s |\n\n' "$SOURCE_RESULT" "$OPENWRT_RESULT" "$NATIVE_RESULT" "$RELEASE_RESULT"
             printf 'Successful targets upload files independently. Download them from [this run’s Artifacts](%s#artifacts).\n\n' "$RUN_URL"
-            printf 'OpenWrt artifacts contain standalone .apk files and a complete .tar.gz bundle. Install matching unsigned APKs with --allow-untrusted.\n\n'
+            printf 'OpenWrt artifacts contain standalone core APKs and metadata. The x86-64-x86_64 artifact also contains the shared noarch LuCI APK. Install with --allow-untrusted.\n\n'
             if [[ "$RELEASE_RESULT" == skipped ]]; then
               printf 'Release was skipped because a required job did not succeed. This does not mean that successful OpenWrt jobs failed to produce APKs.\n'
             fi

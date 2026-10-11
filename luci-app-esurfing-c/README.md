@@ -2,7 +2,7 @@
 
 为 `esurfing-c 0.2.0` 提供精简中文界面，入口为 **服务 → 天翼校园**。兼容本仓库的 UCI 配置与 init.d/procd 服务，前端使用原生 LuCI JavaScript 表单，后端作为 ucode 模块加载到现有 rpcd。没有新增守护进程，不依赖 Python 或 Node.js。
 
-安装包内部架构是 `noarch`；多架构工作流为每个 SDK 目标分别构建，使用对应目标压缩包内的 LuCI APK，以 `apk add --allow-untrusted` 安装。运行环境为 OpenWrt 25.12 的现代 LuCI；需要已安装 C 客户端、LuCI、rpcd 的 ucode 插件及 fs/uci/ubus 模块。安装步骤见 [LuCI 安装说明](../docs/install.md)。
+安装包内部架构是 `noarch`；多架构工作流只在 x86 SDK 任务中构建一次，各 OpenWrt CPU 架构共用同一个 `luci-app-esurfing-c-*-noarch.apk`，以 `apk add --allow-untrusted` 安装。运行环境为 OpenWrt 25.12 的现代 LuCI；需要已安装 C 客户端、LuCI、rpcd 的 ucode 插件及 fs/uci/ubus 模块。安装步骤见 [LuCI 安装说明](../docs/install.md)。
 
 ## 页面功能
 
@@ -33,7 +33,7 @@
 JOBS=2 bash scripts/build-openwrt.sh /path/to/openwrt-sdk /path/to/empty-output
 ```
 
-脚本使用 SDK 配方生成依赖、安装脚本和文件清单；GitHub 手动工作流调用同一脚本。详见 [构建与发布](../docs/building.md)。本次未迁入原项目的独立手工打包脚本和测试目录，也未执行测试。
+脚本使用 SDK 配方生成依赖、安装脚本和文件清单；GitHub 手动工作流调用同一脚本，仅 x86 任务启用 LuCI，其他任务设置 `BUILD_LUCI=false`。详见 [构建与发布](../docs/building.md)。本次未迁入原项目的独立手工打包脚本和测试目录，也未执行测试。
 
 ## 版本记录与范围
 

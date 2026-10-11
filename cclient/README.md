@@ -65,7 +65,7 @@ uci commit esurfing
 JOBS=2 bash scripts/build-openwrt.sh /path/to/openwrt-sdk /path/to/empty-output
 ```
 
-脚本同时构建 C 客户端和可选 LuCI 包，生成未签名 APK、校验和及构建信息；不运行项目测试。GitHub 手动工作流调用同一脚本。构建和发布步骤见 [构建与发布](../docs/building.md)。
+脚本默认同时构建 C 客户端和可选 LuCI 包，设置 `BUILD_LUCI=false` 可仅构建核心包；生成未签名 APK、校验和及构建信息；不运行项目测试。GitHub 手动工作流调用同一脚本，仅 x86 任务额外生成一份共享的 noarch LuCI APK。构建和发布步骤见 [构建与发布](../docs/building.md)。
 
 将核心包手动加入 SDK 时，包目录须包含 `cclient/openwrt/Makefile`、`cclient/src/` 和 `cclient/openwrt/files/`，分别放入 `package/esurfing-c/Makefile`、`src/` 和 `files/`。旧版 SDK 的 `.ipk` 不能重命名为 `.apk`。
 

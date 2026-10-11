@@ -11,7 +11,7 @@
 | `cclient/src/` | C 客户端、协议编解码、密码算法和网卡信息读取 |
 | `cclient/openwrt/` | OpenWrt 包配方、UCI 配置、procd 服务及凭据示例 |
 | `luci-app-esurfing-c/` | 配套 LuCI 前端、ucode RPC 后端、ACL 和包配方 |
-| `scripts/build-openwrt.sh` | 使用 Linux OpenWrt SDK 构建两个未签名 APK |
+| `scripts/build-openwrt.sh` | 使用 Linux OpenWrt SDK 构建核心 APK，可选构建 LuCI APK |
 | `scripts/build-native.sh` | 原生构建 macOS/Linux ARM64 和 x86_64 可执行文件 |
 | `.github/workflows/release-apk.yml` | 手动构建 OpenWrt APK 和原生程序，发布到同一 Release |
 | `docs/protocol.md` | 协议证据、算法包结构、三种算法模板及 C 源码对应关系 |
@@ -23,7 +23,7 @@
 
 ## 安装与使用
 
-从本仓库 [Releases](https://github.com/TNTinMinecraft/Esurfing_OpenWrt/releases) 下载手动工作流生成的文件，按 [安装说明](docs/install.md) 校验并安装。当前工作流使用 **OpenWrt 25.12.0 / musl**，一次构建 x86_64、ARMv7、两种 ARM64、大小端 MIPS/MIPS64 和 RISC-V 64，共九个 SDK 目标。各目标同时发布独立 `.apk` 和完整压缩包（内含未签名 APK 及校验文件）；具体包架构和 SDK 对应关系见 [构建矩阵](docs/building.md)。请选择与设备匹配的一个压缩包，校验后通过 `apk add --allow-untrusted` 安装。
+从本仓库 [Releases](https://github.com/TNTinMinecraft/Esurfing_OpenWrt/releases) 下载手动工作流生成的文件，按 [安装说明](docs/install.md) 校验并安装。当前工作流使用 **OpenWrt 25.12.0 / musl**，一次构建 x86_64、ARMv7、两种 ARM64、大小端 MIPS/MIPS64 和 RISC-V 64，共九个 SDK 目标。发布九个架构对应的核心 APK 和一份共享的 `noarch` LuCI APK，附带校验文件，不再发布 OpenWrt `.tar.gz`；具体包架构和 SDK 对应关系见 [构建矩阵](docs/building.md)。请选择与设备匹配的核心 APK 和可选的共享 LuCI APK，校验后通过 `apk add --allow-untrusted` 安装。
 
 macOS/Linux 用户可下载 `esurfing-macos-arm64.tar.gz`、`esurfing-macos-x86_64.tar.gz`、`esurfing-linux-arm64.tar.gz` 或 `esurfing-linux-x86_64.tar.gz`，安装匹配的运行库后直接执行压缩包中的 `esurfing`，见 [原生程序说明](docs/native.md)。
 

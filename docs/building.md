@@ -30,25 +30,23 @@ workflow 本身使用所选分支/版本中的定义，包源码始终从输入�
 
 构建 job 只有仓库读取权限，Release job 才获得 `contents: write`，使用内置 `GITHUB_TOKEN`，不需要个人访问令牌。若仓库或组织限制 Actions 的写权限，需要允许该发布 job 创建 Release。
 
-每个 OpenWrt 目标生成一个独立压缩包，命名为 `esurfing-openwrt-25.12.0-<target>-<subtarget>-<arch>.tar.gz`。这样无需改写 APK 内部架构，也不会因 APK、noarch LuCI 或清单同名而互相覆盖。只下载与设备匹配的压缩包，解压后包含：
+OpenWrt 直接发布 APK，不再生成或发布 `esurfing-openwrt-25.12.0-*.tar.gz`：
 
-- `esurfing-c-*.apk`：C 客户端、UCI 和 procd 服务。
-- `luci-app-esurfing-c-*.apk`：架构无关的 LuCI 界面。
-- `SHA256SUMS`、`BUILD-INFO.txt`、`INSTALL.md` 和 `LICENSE`。
+- 九个 `esurfing-c-<版本>-<target>-<subtarget>-<arch>.apk`，各自对应一个 SDK 目标。
+- 一个 `luci-app-esurfing-c-<版本>-noarch.apk`，仅在 `x86/64` 任务中构建，供所有受支持的 OpenWrt CPU 架构共用。
+- 各目标的 `openwrt-25.12.0-<target>-<subtarget>-<arch>.BUILD-INFO.txt` 和 `.SHA256SUMS`，记录来源并校验文件。
 
-Release 和各 OpenWrt Artifact 还直接提供两个独立 `.apk` 文件，文件名追加 `<target>-<subtarget>-<arch>`，避免不同目标之间覆盖；APK 内部包名、版本、架构和依赖不变。即使 LuCI 是 noarch，也保留各目标独立生成的包及依赖元数据。
+LuCI 配方使用 `PKGARCH:=all`，SDK 将其打包为 `noarch`。包内只有 JavaScript、ucode、JSON 和 Shell，没有 CPU 相关二进制；仍需满足同一 OpenWrt 版本的 LuCI、rpcd、ucode 和核心客户端依赖，不适用于 macOS、普通 Linux 或旧版 opkg 固件。其余八个任务设置 `BUILD_LUCI=false`，只编译核心包，不初始化 LuCI feed 或编译 LuCI 依赖。
 
-每个 OpenWrt Artifact 附带独立的 `<压缩包名称去掉.tar.gz>.SHA256SUMS`，Release 汇总这些清单并在发布前校验。
+各目标保存为独立的 `openwrt-apk-<target>-<subtarget>-<arch>` Artifact，保留 14 天；共享 LuCI APK 位于 `openwrt-apk-x86-64-x86_64` Artifact 中。Release 汇总全部 APK、构建信息和清单，发布前验证各目标清单，并附带总 `SHA256SUMS`、`INSTALL.md`、`BUILDING.md`、`NATIVE.md` 和 `LICENSE`。
 
-Release 同时附带总 `SHA256SUMS`、`INSTALL.md`、`BUILDING.md`、`NATIVE.md` 和 `LICENSE`。总清单用于校验压缩包和独立 APK，解压后的清单用于校验两个 APK 和配套文件。
-
-构建信息记录源码提交、SDK、目标、包架构、实际 feed 提交及包版本。构建保留 SDK 自带的 feed 配置和提交锁定，只初始化需要的 `base`、`packages`、`luci`。每个目标的压缩包使用独立名称保存为 Actions Artifact，保留 14 天，最后统一汇总到同一个 Release。工作流只进行构建和文件完整性检查，不运行项目测试或连接路由器。
+构建信息记录源码提交、SDK、目标、包架构、实际 feed 提交、是否构建 LuCI 及包版本。构建保留 SDK 自带的 feed 配置和提交锁定，只初始化需要的 feeds。工作流只进行构建和文件完整性检查，不运行项目测试或连接路由器。
 
 ## 构建缓存与耗时
 
-每个 SDK 单独缓存完整构建目录，包括工具链、feeds、下载文件和依赖编译结果。缓存键包含 SDK SHA-256（同时固定 SDK 自带的 feed 配置）、runner 镜像版本、构建脚本、两份包配方和工作流摘要；不跨架构或不同配置恢复缓存。只有构建和上传成功后才保存缓存，缓存服务不可用时仍可从官方下载 SDK 构建。
+每个 SDK 单独缓存完整构建目录，包括工具链、feeds、下载文件和依赖编译结果。缓存键包含 SDK SHA-256（同时固定 SDK 自带的 feed 配置）、runner 镜像版本、构建脚本、两份包配方、是否构建 LuCI 和工作流摘要；不跨架构或不同配置恢复缓存。只有构建和上传成功后才保存缓存，缓存服务不可用时仍可从官方下载 SDK 构建。
 
-缓存命中后跳过 SDK 下载、解压及 feeds 初始化，复用已编译依赖。本项目的 C 源码和 LuCI 文件每次重新复制，先清理两个包及旧 APK，再重新编译打包。因此只修改 C/UI 文件可以复用依赖，而修改依赖配方、SDK 或构建配置会重新建立缓存。默认并行度为 `nproc`，可通过 `JOBS` 覆盖。通过 LuCI 对核心包的依赖关系，从一个 make 入口完成两个包，减少重复依赖扫描。
+缓存命中后跳过 SDK 下载、解压及 feeds 初始化，复用已编译依赖。本项目选定包的文件每次重新复制，清理其旧构建结果及旧 APK 后再重新编译打包。因此只修改 C/UI 文件可以复用依赖，而修改依赖配方、SDK 或构建配置会重新建立缓存。默认并行度为 `nproc`，可通过 `JOBS` 覆盖。仅 x86 任务通过 LuCI 对核心包的依赖关系，从一个 make 入口完成两个包；其他任务直接构建核心包。
 
 首次运行仍需编译依赖，并额外上传缓存；优化主要收益在后续命中缓存的运行。完整 SDK 缓存较大，受仓库缓存配额和自动淘汰影响，不能保证每次命中。建议在默认分支手动运行工作流，再用输入框指定发布 tag，让不同发布版本共享默认分支缓存；不同 tag 的工作流缓存并不直接共享，见 [GitHub 缓存范围说明](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache)。需要强制冷构建时，在 Actions → Caches 删除对应 `esurfing-sdk-v1-…` 缓存。
 
@@ -73,7 +71,7 @@ GitHub Run time 表格底部是各 job 的累计时长；矩阵并行执行时�
 
 `scripts/build-native.sh` 调用 C Makefile，不执行测试或生成的客户端。macOS 分支通过 `xcrun --sdk macosx` 获取编译器与 SDK，显式设置 `SDKROOT` 和 `-isysroot`，确保 Xcode clang 能找到 `signal.h` 等系统头文件及系统库。压缩包内包含可执行文件 `esurfing`、运行说明 `NATIVE.md`、`BUILD-INFO.txt`、`SHA256SUMS` 和许可证。构建信息记录依赖版本、macOS SDK 路径/版本、Mach-O/ELF 信息和动态库依赖；运行条件见 [原生可执行文件说明](native.md)。
 
-四个目标的 Artifact 使用独立名称保留 14 天。Release job 等待两个矩阵全部成功，将十三份压缩包与总校验和发布到同一 Release；文件名前缀区分 OpenWrt 和普通 macOS/Linux，避免同架构产物混淆。
+四个目标的 Artifact 使用独立名称保留 14 天。Release job 等待两个矩阵全部成功，将十个 OpenWrt APK、四份原生程序压缩包及元数据与总校验和发布到同一 Release；文件名前缀区分 OpenWrt 和普通 macOS/Linux，避免同架构产物混淆。
 
 在相应平台安装工作流列出的开发依赖后，也可生成本机发布目录（输出目录须为空）：
 
@@ -102,7 +100,7 @@ bash scripts/build-native.sh linux x86_64 /path/to/output
 bash scripts/build-openwrt.sh /path/to/openwrt-sdk /path/to/output
 ```
 
-脚本只更新 `base`、`packages`、`luci` feeds，并递归安装所需依赖配方，复制本仓库两份包，关闭全量构建和包签名选项，仅编译目标包及依赖。默认使用全部可用 CPU 核数；内存较少时可在命令前添加 `JOBS=2`。依赖由 SDK 交叉编译，目标包使用 SDK 的 APK 打包流程生成。每次构建先清理这两个包的旧构建结果，避免复用 SDK 时导出此前已签名的产物；输出保留 SHA-256 校验和及构建信息。
+本地默认同时构建两个包；设置 `BUILD_LUCI=false` 可仅构建核心包。脚本更新 `base`、`packages` feeds，只有启用 LuCI 时才更新 `luci` feed，并递归安装所需依赖配方。脚本关闭全量构建和包签名选项，仅编译选定包及依赖。默认使用全部可用 CPU 核数；内存较少时可在命令前添加 `JOBS=2`。依赖由 SDK 交叉编译，目标包使用 SDK 的 APK 打包流程生成。每次构建先清理选定包的旧构建结果，避免复用 SDK 时导出此前已签名的产物；输出保留 SHA-256 校验和及构建信息。
 
 新增目标时，在矩阵 `include` 增加 `arch`、`target`、`subtarget`、`sdk`、`sha256`，并更新架构列表。变更 OpenWrt 版本时，同时更新 `OPENWRT_VERSION`、`SDK_BASE_URL` 的版本、各矩阵条目的 SDK 文件名/摘要及文档。每项须使用对应下载页的真实摘要；脚本会核对 SDK 实际 target/subtarget 与包架构，发现不匹配即停止。仅改文件名不能把其他架构的包变成可安装的 APK。切换 SDK 或发布版本建议使用全新解压目录。
 

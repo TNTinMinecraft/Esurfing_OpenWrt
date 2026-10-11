@@ -2,29 +2,23 @@
 
 ## 下载与校验
 
-从 GitHub Release 下载与设备匹配的一个 `esurfing-openwrt-25.12.0-<target>-<subtarget>-<arch>.tar.gz` 及总 `SHA256SUMS`。每个压缩包包含核心 APK、LuCI APK、内部 `SHA256SUMS`、`BUILD-INFO.txt`、`INSTALL.md` 和 `LICENSE`；无需下载所有架构。
-
-也可直接下载 Release 的独立 `.apk` 附件，核心包和 LuCI 包应选择相同的 `<target>-<subtarget>-<arch>` 后缀。独立 APK 的文件名带目标后缀，内部包信息不变；按总 `SHA256SUMS` 中对应文件行校验，再使用下方 `apk add --allow-untrusted` 安装。只在目录中放置所需目标的 APK，避免通配符选中其他架构。
-
-若没有 Release，请进入对应 Actions 运行的 **Artifacts** 下载 `openwrt-apk-<target>-<subtarget>-<arch>`。其他平台失败可能阻止 Release 发布，但不影响成功目标的 Artifact。新工作流的 Artifact 还附带该目标的 `esurfing-openwrt-….SHA256SUMS`，解压后用 `sha256sum -c <该清单文件名>` 校验独立 APK 和压缩包。旧工作流的 Artifact 解压后还有一层 `.tar.gz`，继续解压即可得到 APK。
+从 GitHub Release 下载与设备匹配的 `esurfing-c-<版本>-<target>-<subtarget>-<arch>.apk`、总 `SHA256SUMS`，以及可选的 `luci-app-esurfing-c-<版本>-noarch.apk`。OpenWrt 不再额外发布 `.tar.gz`；APK 可以直接安装。
 
 工作流覆盖 x86_64、ARMv7、两种 ARM64、大小端 MIPS/MIPS64 和 RISC-V 64，均基于 OpenWrt 25.12.0 / musl。具体 SDK/包架构对应表见 Release 附件 `BUILDING.md`。用 `ubus call system board` 查看设备 target，并用 `apk --print-arch` 查看包架构；应同时核对固件版本、具体架构及软件源。`mips64_mips64r2` 并不是所有 MIPS64 设备的通用包。
 
-以下以 `ramips/mt7621` 的 `mipsel_24kc` 为例，在存放下载文件的目录执行，其他设备替换压缩包文件名：
+以下以 `ramips/mt7621` 的 `mipsel_24kc` 为例，在仅存放本次所需 APK 的目录执行，版本号和文件名以 Release 为准：
 
 ```sh
-bundle='esurfing-openwrt-25.12.0-ramips-mt7621-mipsel_24kc.tar.gz'
-# 只校验已下载的这个架构
-awk -v file="$bundle" '$2 == file' SHA256SUMS | sha256sum -c -
-mkdir -p /tmp/esurfing-release
-tar -xzf "$bundle" -C /tmp/esurfing-release
-cd /tmp/esurfing-release
-sha256sum -c SHA256SUMS
+core='esurfing-c-0.2.0-r2-ramips-mt7621-mipsel_24kc.apk'
+luci='luci-app-esurfing-c-0.2.0-r3-noarch.apk'
+# 只校验已下载的文件；未安装 LuCI 时省略第二组命令
+awk -v file="$core" '$2 == file { print; found=1 } END { if (!found) exit 1 }' SHA256SUMS > core.sha256 && sha256sum -c core.sha256
+awk -v file="$luci" '$2 == file { print; found=1 } END { if (!found) exit 1 }' SHA256SUMS > luci.sha256 && sha256sum -c luci.sha256
 ```
 
-每次解压请使用空目录，避免混入旧版本或其他架构的 APK。若使用本地 SDK 脚本的输出目录，文件已经展开，直接执行内部校验即可。
+LuCI APK 内部架构为 `noarch`，只构建一份，供本次发布的各 OpenWrt CPU 架构共用。运行仍需要兼容的现代 LuCI、rpcd 和 ucode，以及适合设备架构的核心客户端。APK 不能安装在使用 opkg/IPK 的旧固件中。
 
-LuCI 包内部架构仍是 noarch，每个目标分别构建，安装时使用所选压缩包内的版本。运行需要兼容的现代 LuCI、rpcd 和 ucode；APK 不能安装在使用 opkg/IPK 的旧固件中。
+若没有 Release，请进入对应 Actions 运行的 **Artifacts** 下载 `openwrt-apk-<target>-<subtarget>-<arch>`；共享 LuCI APK 从 `openwrt-apk-x86-64-x86_64` 获取，只取其中的 LuCI APK，不要安装不匹配的 x86 核心包。各 Artifact 附带该目标的 `.SHA256SUMS` 和 `.BUILD-INFO.txt`；完整解压后可用 `sha256sum -c <清单文件名>` 校验。其他平台失败可能阻止 Release 发布，但不影响成功目标的 Artifact。早期工作流的 Artifact 内还有 `.tar.gz`，其中包含 APK。
 
 这些 APK 未签名。完成 SHA-256 校验后，使用 `--allow-untrusted` 忽略签名要求并安装：
 
