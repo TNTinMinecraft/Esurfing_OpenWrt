@@ -1,0 +1,13 @@
+{
+	"luci-app-esurfing-c": {
+		"description": "Configure and control the esurfing C client",
+		"read": {
+			"uci": [ "esurfing", "network" ],
+			"ubus": { "luci.esurfing": [ "status", "logs" ] }
+		},
+		"write": {
+			"uci": [ "esurfing" ],
+			"ubus": { "luci.esurfing": [ "save_credentials", "action" ] }
+		}
+	}
+}

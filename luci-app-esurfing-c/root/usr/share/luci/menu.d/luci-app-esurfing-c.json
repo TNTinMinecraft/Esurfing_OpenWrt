@@ -1,0 +1,8 @@
+{
+	"admin/services/esurfing": {
+		"title": "天翼校园",
+		"order": 60,
+		"action": { "type": "view", "path": "esurfing/settings" },
+		"depends": { "acl": [ "luci-app-esurfing-c" ], "uci": { "esurfing": true } }
+	}
+}

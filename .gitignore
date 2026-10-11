@@ -1,0 +1,33 @@
+# Local builds and SDKs.
+.DS_Store
+__pycache__/
+*.py[cod]
+.build/
+dist/
+openwrt-sdk*/
+cclient/esurfing
+*.o
+*.dSYM/
+*.apk
+*.ipk
+
+# Local credentials and signing keys; never publish these.
+credentials*
+!credentials.example
+client-id
+*.pem
+*.key
+.env
+.env.*
+
+# Private research material stays in the original project.
+analysis/
+*.pcap
+*.pcapng
+*.dll
+*.zem
+*.bin
+*.zip
+*.tar.gz
+*.tar.zst
+*.asar

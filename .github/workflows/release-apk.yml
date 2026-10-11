@@ -1,0 +1,296 @@
+name: Build and release APKs and binaries
+
+# Deliberately manual: pushing commits/tags never starts this workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing Git tag to build and release (for example v0.2.0)'
+        required: true
+        type: string
+      draft:
+        description: 'Create a draft release instead of publishing immediately'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: esurfing-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  OPENWRT_VERSION: 25.12.0
+
+jobs:
+  source:
+    name: Resolve release source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Record source commit
+        id: source
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.arch }} (${{ matrix.target }}/${{ matrix.subtarget }})
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Use real OpenWrt SDK ABIs, not Go's GOARCH/GOMIPS flags.
+          - arch: x86_64
+            target: x86
+            subtarget: '64'
+            sdk: openwrt-sdk-25.12.0-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+            sha256: 9f371906ce6d2f95418f69fac06df58bf9df0ffc4abed6206c30f1b547fcfc12
+          - arch: arm_cortex-a9_vfpv3-d16
+            target: mvebu
+            subtarget: cortexa9
+            sdk: openwrt-sdk-25.12.0-mvebu-cortexa9_gcc-14.3.0_musl_eabi.Linux-x86_64.tar.zst
+            sha256: 6f03bf9a8673e461495f5c65b7b2310355e39d42970c22c32ca37d5367aec6d7
+          - arch: aarch64_generic
+            target: armsr
+            subtarget: armv8
+            sdk: openwrt-sdk-25.12.0-armsr-armv8_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+            sha256: 407f30aae17ca93a65260249f1f5f8ae83efc9393360c9a98e575e65c5b8392e
+          - arch: aarch64_cortex-a53
+            target: mediatek
+            subtarget: filogic
+            sdk: openwrt-sdk-25.12.0-mediatek-filogic_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+            sha256: 7e45a85b4af8af53ff17ca610ad6a7df312568cb52b730f93a21a91899f33139
+          - arch: mips_24kc
+            target: ath79
+            subtarget: generic
+            sdk: openwrt-sdk-25.12.0-ath79-generic_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+            sha256: 443f301864e2c703427237096772358f4a93ad090e1a9b2ccb780b6bc52d51d1
+          - arch: mipsel_24kc
+            target: ramips
+            subtarget: mt7621
+            sdk: openwrt-sdk-25.12.0-ramips-mt7621_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+            sha256: 3549daf11c183241448e965faa2859e26fba1a676a769bfadabba22b65c94696
+          - arch: mips64_mips64r2
+            target: malta
+            subtarget: be64
+            sdk: openwrt-sdk-25.12.0-malta-be64_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+            sha256: a4b4b2c1b7bcde062e890cd1ed0298f9570e7851dd12ca4b2beffa83afd72d9c
+          - arch: mips64el_mips64r2
+            target: malta
+            subtarget: le64
+            sdk: openwrt-sdk-25.12.0-malta-le64_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+            sha256: b9432e7b37315f78dc6d39f8617f62aab43ae915e36813b2655bf3226ddc8801
+          - arch: riscv64_generic
+            target: sifiveu
+            subtarget: generic
+            sdk: openwrt-sdk-25.12.0-sifiveu-generic_gcc-14.3.0_musl.Linux-x86_64.tar.zst
+            sha256: 6326bcc7a2c8e5cca8961deba96201b2d55820cc403b781d14cfa8787996f9c1
+    env:
+      SDK_BASE_URL: https://downloads.openwrt.org/releases/25.12.0/targets/${{ matrix.target }}/${{ matrix.subtarget }}
+      SDK_ARCHIVE: ${{ matrix.sdk }}
+      SDK_SHA256: ${{ matrix.sha256 }}
+      EXPECTED_PACKAGE_ARCH: ${{ matrix.arch }}
+      EXPECTED_TARGET_BOARD: ${{ matrix.target }}
+      EXPECTED_TARGET_SUBTARGET: ${{ matrix.subtarget }}
+    steps:
+      - name: Check out the resolved source commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          persist-credentials: false
+
+      - name: Install SDK build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+            gettext git libncurses-dev libssl-dev python3 python3-setuptools \
+            python3-pyelftools rsync swig unzip zlib1g-dev file wget curl \
+            xz-utils zstd patch perl pkgconf subversion time
+
+      - name: Download and verify the official SDK
+        run: |
+          curl --fail --location --retry 3 \
+            "$SDK_BASE_URL/$SDK_ARCHIVE" --output "$RUNNER_TEMP/$SDK_ARCHIVE"
+          cd "$RUNNER_TEMP"
+          printf '%s  %s\n' "$SDK_SHA256" "$SDK_ARCHIVE" | sha256sum --check --strict
+          mkdir sdk
+          tar --zstd -xf "$SDK_ARCHIVE" -C sdk --strip-components=1
+
+      - name: Build unsigned APK packages
+        env:
+          JOBS: '2'
+        run: |
+          bash scripts/build-openwrt.sh "$RUNNER_TEMP/sdk" "$GITHUB_WORKSPACE/dist"
+
+      - name: Bundle packages for this target
+        run: |
+          # Keep each target's APKs and manifest together without filename collisions.
+          bundle="esurfing-openwrt-${OPENWRT_VERSION}-${EXPECTED_TARGET_BOARD}-${EXPECTED_TARGET_SUBTARGET}-${EXPECTED_PACKAGE_ARCH}"
+          mkdir -p "$RUNNER_TEMP/release-files"
+          cd dist
+          sha256sum --check SHA256SUMS
+          tar -czf "$RUNNER_TEMP/release-files/$bundle.tar.gz" \
+            ./*.apk SHA256SUMS BUILD-INFO.txt INSTALL.md LICENSE
+
+      - name: Upload this target's release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-apk-${{ matrix.target }}-${{ matrix.subtarget }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/release-files/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  native:
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }} binary
+    needs: source
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            arch: arm64
+            runner: macos-15
+          - platform: macos
+            arch: x86_64
+            runner: macos-15-intel
+          - platform: linux
+            arch: arm64
+            runner: ubuntu-22.04-arm
+          - platform: linux
+            arch: x86_64
+            runner: ubuntu-22.04
+    steps:
+      - name: Check out the resolved source commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          persist-credentials: false
+
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libcurl4-openssl-dev liblzma-dev \
+            libexpat1-dev ca-certificates file binutils
+
+      - name: Install macOS build dependencies
+        if: matrix.platform == 'macos'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+        run: brew install curl xz expat
+
+      - name: Build and bundle the native executable
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          bash scripts/build-native.sh "$TARGET_PLATFORM" "$TARGET_ARCH" "$GITHUB_WORKSPACE/dist"
+          mkdir -p "$RUNNER_TEMP/release-files"
+          tar -czf "$RUNNER_TEMP/release-files/esurfing-${TARGET_PLATFORM}-${TARGET_ARCH}.tar.gz" \
+            -C dist esurfing SHA256SUMS BUILD-INFO.txt NATIVE.md LICENSE
+
+      - name: Upload this platform's release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-binary-${{ matrix.platform }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/release-files/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    # Publish only after every matrix entry succeeds. A failed build does not
+    # cancel other targets, whose successful artifacts remain downloadable.
+    needs: [source, build, native]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release documentation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          persist-credentials: false
+
+      - name: Download OpenWrt target bundles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: openwrt-apk-*
+          merge-multiple: true
+          path: dist
+
+      - name: Download native executable bundles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-binary-*
+          merge-multiple: true
+          path: dist
+
+      - name: Prepare combined release files
+        run: |
+          cp docs/install.md dist/INSTALL.md
+          cp docs/building.md dist/BUILDING.md
+          cp docs/native.md dist/NATIVE.md
+          cp LICENSE dist/LICENSE
+          cd dist
+          sha256sum -- *.tar.gz INSTALL.md BUILDING.md NATIVE.md LICENSE > SHA256SUMS
+
+      - name: Publish a release for the built tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_COMMIT: ${{ needs.source.outputs.commit }}
+          DRAFT: ${{ inputs.draft }}
+        run: |
+          # Dereference annotated tags and reject a tag moved during the build.
+          encoded_tag=$(jq -rn --arg value "$RELEASE_TAG" '$value | @uri')
+          object=$(gh api "repos/$GH_REPO/git/ref/tags/$encoded_tag" --jq '.object')
+          while [[ $(jq -r '.type' <<< "$object") == tag ]]; do
+            object=$(gh api "repos/$GH_REPO/git/tags/$(jq -r '.sha' <<< "$object")" --jq '.object')
+          done
+          [[ $(jq -r '.type' <<< "$object") == commit ]]
+          [[ $(jq -r '.sha' <<< "$object") == "$SOURCE_COMMIT" ]] || {
+            echo 'The release tag no longer points to the built commit.' >&2
+            exit 1
+          }
+          cd dist
+          sha256sum --check SHA256SUMS
+          {
+            printf 'OpenWrt %s APKs + macOS/Linux ARM64 and x86_64 executables\n\n' "$OPENWRT_VERSION"
+            printf 'Source commit: `%s`\n\n' "$SOURCE_COMMIT"
+            printf 'Download the bundle matching your OS and architecture. Each bundle includes checksums and build information.\n'
+            printf 'OpenWrt: install unsigned APKs with apk add --allow-untrusted (INSTALL.md).\n'
+            printf 'macOS/Linux: extract the esurfing executable and install its runtime libraries (NATIVE.md).\n'
+            printf 'Project tests were not run.\n\n'
+            printf 'Available bundles:\n\n'
+            for bundle in *.tar.gz; do printf -- '- `%s`\n' "$bundle"; done
+          } > "$RUNNER_TEMP/release-notes.md"
+          options=(--verify-tag --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md")
+          if [[ "$DRAFT" == true ]]; then options+=(--draft); fi
+          # gh release create fails if a release already exists; never overwrite it.
+          gh release create "$RELEASE_TAG" "${options[@]}" \
+            ./*.tar.gz SHA256SUMS INSTALL.md BUILDING.md NATIVE.md LICENSE
