@@ -1,6 +1,6 @@
 # Esurfing_OpenWrt
 
-江苏天翼校园 HTTP Portal 精简 C 客户端，提供 OpenWrt APK、macOS/Linux 可执行文件，以及可选的 LuCI 中文配置界面和协议分析。核心流程为门户发现、算法协商、获取 ticket、登录、定时保活、自动重连和注销。
+江苏天翼校园 HTTP Portal 精简 C 客户端，提供 OpenWrt APK、macOS/Linux 可执行文件，以及可选的 LuCI 中文配置界面和协议分析。核心流程为门户发现、算法协商、获取 ticket、登录、定时保活、外网连通性检查、自动重连和注销。
 
 运行依赖为 libcurl、liblzma、libexpat；路由器不需要 Python 或 Node.js。支持已识别的双层 3DES-ECB、双层 3DES-CBC 和三层变体 TEA 模板，只解析算法包，不执行服务器下发的 DLL。
 
@@ -26,6 +26,10 @@
 从本仓库 [Releases](https://github.com/TNTinMinecraft/Esurfing_OpenWrt/releases) 下载手动工作流生成的文件，按 [安装说明](docs/install.md) 校验并安装。当前工作流使用 **OpenWrt 25.12.0 / musl**，一次构建 x86_64、ARMv7、两种 ARM64、大小端 MIPS/MIPS64 和 RISC-V 64，共九个 SDK 目标。发布九个架构对应的核心 APK 和一份共享的 `noarch` LuCI APK，附带校验文件，不再发布 OpenWrt `.tar.gz`；具体包架构和 SDK 对应关系见 [构建矩阵](docs/building.md)。请选择与设备匹配的核心 APK 和可选的共享 LuCI APK，校验后通过 `apk add --allow-untrusted` 安装。
 
 macOS/Linux 用户可下载 `esurfing-macos-arm64.tar.gz`、`esurfing-macos-x86_64.tar.gz`、`esurfing-linux-arm64.tar.gz` 或 `esurfing-linux-x86_64.tar.gz`，安装匹配的运行库后直接执行压缩包中的 `esurfing`，见 [原生程序说明](docs/native.md)。
+
+核心包 `0.2.0-r3` 起默认每 30 秒独立检查外网，连续 3 次失败自动重登，避免“保活正常但外网已断”的会话一直保留。检测地址和间隔可在 LuCI“自动重试”页配置，详见 [自动重试策略](cclient/README.md#自动重试策略)。
+
+另可在 LuCI“定时重拨”页启用每天固定时间重新认证（默认时间 `04:00`，功能默认关闭），详见 [每日定时重拨](cclient/README.md#每日定时重拨)。
 
 `esurfing-c` 是核心包，`luci-app-esurfing-c` 是可选界面。安装后服务默认禁用；使用 **服务 → 天翼校园** 配置账号和逻辑接口，或按 [C 客户端说明](cclient/README.md) 配置凭据、UCI 和服务。
 

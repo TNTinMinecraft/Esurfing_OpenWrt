@@ -104,7 +104,7 @@ bash scripts/build-openwrt.sh /path/to/openwrt-sdk /path/to/output
 
 新增目标时，在矩阵 `include` 增加 `arch`、`target`、`subtarget`、`sdk`、`sha256`，并更新架构列表。变更 OpenWrt 版本时，同时更新 `OPENWRT_VERSION`、`SDK_BASE_URL` 的版本、各矩阵条目的 SDK 文件名/摘要及文档。每项须使用对应下载页的真实摘要；脚本会核对 SDK 实际 target/subtarget 与包架构，发现不匹配即停止。仅改文件名不能把其他架构的包变成可安装的 APK。切换 SDK 或发布版本建议使用全新解压目录。
 
-包内版本分别取自 `cclient/openwrt/Makefile` 和 `luci-app-esurfing-c/Makefile` 中的 `PKG_VERSION` / `PKG_RELEASE`；Git tag 不会自动改写包版本。升级代码时按需递增包版本或 release 号，再提交和打 tag。当前保留核心 `0.2.0-r2` 与 LuCI `0.2.0-r3`。
+包内版本分别取自 `cclient/openwrt/Makefile` 和 `luci-app-esurfing-c/Makefile` 中的 `PKG_VERSION` / `PKG_RELEASE`；Git tag 不会自动改写包版本。升级代码时按需递增包版本或 release 号，再提交和打 tag。当前核心版本为 `0.2.0-r4`，LuCI 为 `0.2.0-r5`。
 
 ## 本机 C 编译
 

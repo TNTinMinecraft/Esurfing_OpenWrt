@@ -9,8 +9,8 @@
 以下以 `ramips/mt7621` 的 `mipsel_24kc` 为例，在仅存放本次所需 APK 的目录执行，版本号和文件名以 Release 为准：
 
 ```sh
-core='esurfing-c-0.2.0-r2-ramips-mt7621-mipsel_24kc.apk'
-luci='luci-app-esurfing-c-0.2.0-r3-noarch.apk'
+core='esurfing-c-0.2.0-r4-ramips-mt7621-mipsel_24kc.apk'
+luci='luci-app-esurfing-c-0.2.0-r5-noarch.apk'
 # 只校验已下载的文件；未安装 LuCI 时省略第二组命令
 awk -v file="$core" '$2 == file { print; found=1 } END { if (!found) exit 1 }' SHA256SUMS > core.sha256 && sha256sum -c core.sha256
 awk -v file="$luci" '$2 == file { print; found=1 } END { if (!found) exit 1 }' SHA256SUMS > luci.sha256 && sha256sum -c luci.sha256
@@ -41,7 +41,11 @@ apk add --allow-untrusted ./luci-app-esurfing-c-*.apk
 
 修改已有账号时密码留空会保留原密码。密码保存在 `/etc/esurfing/credentials`，不会写入 UCI 或回传浏览器。配置“启用服务”和 init.d 开机自启是两个独立开关。
 
+“自动重试”页默认每 30 秒检测一次外网，连续 3 次失败会自动重新登录；这与通常 300 秒的认证保活独立。检测地址默认 Microsoft Connect Test，可换为稳定可达且返回空正文 HTTP 204 的地址；填普通网页会误判。检测间隔设为 0 可关闭。升级旧配置时，未设置的新选项同样使用上述默认值。
+
 状态中的进程运行不等于认证成功；服务遇到永久性错误可能保持进程但暂停认证，请结合日志判断。
+
+“定时重拨”页可启用每天固定时间重新认证，默认关闭、时间预填 `04:00`。使用路由器系统时区，保存应用后生效；请同时升级核心 `0.2.0-r4` 和 LuCI `0.2.0-r5`。到时会短暂断网，服务停止或永久错误暂停时不触发；详情见 [每日定时重拨](../cclient/README.md#每日定时重拨)。
 
 ## 命令行配置
 

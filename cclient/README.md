@@ -1,6 +1,6 @@
 # 江苏天翼校园精简 C 客户端
 
-用于低性能 OpenWrt：仅保留门户发现、算法协商、登录、定时保活和注销。单进程、单线程应用逻辑，保活期间阻塞等待，不轮询；不依赖 Python，不执行服务器下发的 DLL。协议分析见 [docs/protocol.md](../docs/protocol.md)。
+用于低性能 OpenWrt：仅保留门户发现、算法协商、登录、定时保活和注销。单进程、单线程应用逻辑，认证保活与外网检测独立调度，等待期间阻塞休眠；不依赖 Python，不执行服务器下发的 DLL。协议分析见 [docs/protocol.md](../docs/protocol.md)。
 
 运行依赖为 **libcurl（7.62+）、liblzma、libexpat** 及它们在固件中的依赖。MD5、SHA-256、DES 和变体 TEA 内置，无需额外链接密码学库；HTTPS 使用 libcurl 的 TLS 后端和系统 CA，保持证书校验。依赖包定义：[libcurl](https://github.com/openwrt/packages/blob/master/net/curl/Makefile)、[liblzma](https://github.com/openwrt/packages/blob/master/utils/xz/Makefile)、[libexpat](https://github.com/openwrt/packages/blob/master/libs/expat/Makefile)。
 
@@ -39,11 +39,19 @@ logread -e esurfing
 
 ## 自动重试策略
 
+认证服务器接受保活（常见间隔 300 秒）不代表外网仍然可用。核心包 `0.2.0-r3` 起，默认每 30 秒独立检测外网，连续 3 次失败后注销旧会话，重新发现门户、协商算法、获取 ticket 并登录；单次成功清零连续失败计数。短暂一次失败不会重登。认证保活仍遵循服务器原间隔。正常情况下检测阈值约 90 秒，HTTP 超时、正在进行的保活重试和登录退避可能延长恢复时间。
+
+检测使用相同的校园网接口和源 IPv4，禁用显式 HTTP 代理、不跟随重定向，不携带认证信息；系统 DNS 和路由器的透明代理仍由系统配置决定。默认地址为 `http://www.msftconnecttest.com/connecttest.txt`，验证 HTTP 200 且正文严格为 `Microsoft Connect Test`（允许首尾空白）；自定义地址也可返回空正文 HTTP 204。普通网页、认证登录页、重定向均不能算成功。参考 [Microsoft NCSI 说明](https://learn.microsoft.com/en-us/troubleshoot/windows-server/networking/troubleshoot-ncsi-guidance)。
+
+LuCI 的“自动重试”页可设置检测间隔（0 关闭，启用时 10–86400 秒）与地址。检测站点被屏蔽、DNS 故障或站点维护也会触发重登；应选择该线路稳定可达、未被免认证放行的检测地址。该检查不能证明所有互联网服务或下游设备均可用，也不能解决 NAT、DNS 或线路本身的故障。
+
+日志首次检查成功或失败后恢复时显示 `Internet connectivity check passed`；失败时显示 `Internet connectivity check failed (1/3)`，达到阈值后显示 `Internet connectivity lost ... refreshing session`，随后进入已有重连退避流程。
+
 - 开机接口不存在、未获 IPv4/网关、DNS/连接/收发超时、源 IP 暂时不可绑定时，等待后重试。
 - HTTP 408、429、500、502、503、504 视为暂时故障。支持 `Retry-After` 的秒数形式（最多 86400 秒）；等待可超过配置的普通退避上限。
 - 短暂故障先重试保活，次数遵循服务器 `keep-retry`（默认 5，范围 1–20）。耗尽后重新读取 IP/MAC/网关、发现门户、下载算法、取新 ticket 并登录。
 - 保活返回业务错误或重定向/401/403 时，按会话失效重新登录；IP/MAC/网关变化也会重建会话。服务收到 WAN 事件会用 SIGHUP 唤醒等待并刷新会话。
-- 重连默认约 5、10、20、40、80、160、300 秒，增加最多 25% 抖动但不超过上限；稳定在线至少 120 秒且保活成功至少两次后重置退避。反复刚登录就掉线不会重置。
+- 重连默认约 5、10、20、40、80、160、300 秒，增加最多 25% 抖动但不超过上限；稳定在线至少 120 秒且保活成功至少两次后重置退避；启用外网检测时，还要求最近一次检测成功。反复刚登录就掉线不会重置。
 - **明确的账号拒绝、凭据文件错误、未知算法、非法 XML、额外检测命令或非零 level 不自动再次提交密码。** 前台模式退出；服务模式记录 `suspended` 并休眠，修复后执行 `/etc/init.d/esurfing restart`。此时 procd 的 `status` 仍可能显示进程运行，要结合日志判断认证状态；普通网络 HUP 不解除暂停。
 
 调节退避：
@@ -51,11 +59,34 @@ logread -e esurfing
 ```sh
 uci set esurfing.main.retry_delay='5'
 uci set esurfing.main.retry_max='300'
+uci set esurfing.main.check_interval='30'
+# 可选：自定义返回空正文 HTTP 204 的地址
+# uci set esurfing.main.check_url='https://your-check-host.example/generate_204'
 uci commit esurfing
 /etc/init.d/esurfing restart
 ```
 
-前台也默认自动重连；可使用 `--retry-delay 5 --retry-max 300` 调节，或 `--no-retry` 禁止创建新的重连会话（当前会话内仍遵循保活重试次数）。所有休眠均可被退出信号立即唤醒。程序不探测外网、不修改路由/NAT/防火墙。
+前台也默认自动重连；可使用 `--retry-delay 5 --retry-max 300` 调节，或 `--no-retry` 禁止创建新的重连会话（当前会话内仍遵循保活重试次数）。所有休眠均可被退出信号立即唤醒。可使用 `--check-interval 0` 关闭独立外网检测，或用 `--check-url URL` 指定检测地址；程序不修改路由/NAT/防火墙。
+
+## 每日定时重拨
+
+核心 `0.2.0-r4`、LuCI `0.2.0-r5` 新增每日固定时间重新认证。默认关闭，预填时间为 `04:00`；在 LuCI **服务 → 天翼校园 → 定时重拨** 选择“每天固定时间”，设置时间后保存应用。
+
+到时先尝试注销，再重新发现门户、协商算法并登录，不重启 WAN 或路由器。重拨期间会短暂断网；若登录遇到暂时故障，继续执行原有退避重试。账号拒绝或协议错误仍按原策略暂停；定时器不会启动已停止的服务，也不会解除永久错误暂停。
+
+时间采用路由器的系统时区，请先确认系统时间、时区和 NTP 正常。每次登录成功安排下一个时间点；例如 04:00 之后才启动或恢复服务，会安排次日 04:00，不补做已经错过的重拨。正常调度精度约 30 秒，正在执行的 HTTP 请求和注销可能进一步延迟；日志会记录下次时间及 `Scheduled reauthentication: refreshing session`。修改时区后请重新启动本服务以重新计算时间。
+
+命令行配置示例（由用户在路由器上执行）：
+
+```sh
+uci set esurfing.main.reconnect_mode='daily'
+uci set esurfing.main.reconnect_time='04:00'
+uci commit esurfing
+/etc/init.d/esurfing restart
+# 关闭：将 reconnect_mode 改为 off，提交并重启服务
+```
+
+原生客户端也支持 `--reconnect-at 04:00`，采用运行机器的系统时区；不能与 `--no-retry` 同时使用。不指定该参数则不启用定时重拨。
 
 ## OpenWrt 编译
 

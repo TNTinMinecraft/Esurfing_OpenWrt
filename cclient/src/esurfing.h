@@ -14,6 +14,7 @@
 #define RETRY_NETWORK (-2)
 #define RETRY_SESSION (-3)
 #define DETECT_URL "http://preportal.go189.cn/detect.html"
+#define CHECK_URL "http://www.msftconnecttest.com/connecttest.txt"
 
 typedef struct {
     char id[37];
@@ -53,6 +54,7 @@ int discover(Client *c, const char *url);
 int negotiate(Client *c);
 int login_client(Client *c, const char *username, const char *password);
 int keep_client(Client *c);
+int check_connectivity(Client *c, const char *url);
 int logout_client(Client *c);
 int network_identity(Client *c);
 void sleep_seconds(unsigned seconds);

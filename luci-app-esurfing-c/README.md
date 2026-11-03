@@ -43,3 +43,11 @@ JOBS=2 bash scripts/build-openwrt.sh /path/to/openwrt-sdk /path/to/empty-output
 实际校园网认证和长期在线仍需在设备上确认。
 
 接口依据：[LuCI 25.12 源码](https://github.com/openwrt/luci/tree/openwrt-25.12)、[rpcd ucode 插件示例](https://github.com/openwrt/rpcd/blob/master/examples/ucode/example-plugin.uc)。
+
+### 外网检测
+
+`0.2.0-r4` 的“自动重试”页增加外网检测地址和间隔，需配合核心 `0.2.0-r3` 或更高版本。默认每 30 秒检查一次，连续 3 次失败自动重新登录；间隔 0 表示关闭。默认地址验证 Microsoft Connect Test 正文，自定义地址也可使用空正文 HTTP 204；不能填普通网页。检测点被屏蔽会误触发重连，需要更换地址或关闭检测。
+
+### 每日定时重拨
+
+`0.2.0-r5` 新增“定时重拨”页，需配合核心 `0.2.0-r4`。选择“每天固定时间”，填写 `04:00` 等时间并保存应用即可。默认关闭，采用路由器系统时区；执行注销后重新认证，不重启 WAN。服务停止或因永久错误暂停时不会触发。

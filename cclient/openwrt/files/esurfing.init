@@ -8,6 +8,8 @@ extra_command "network_changed" "Refresh the active campus network session"
 
 start_service() {
 	local enabled interface device credentials gateway portal_url ticket_url auth_url retry_delay retry_max
+	local check_interval check_url
+	local reconnect_mode reconnect_time
 	config_load esurfing
 	config_get_bool enabled main enabled 0
 	[ "$enabled" = 1 ] || return 0
@@ -20,6 +22,14 @@ start_service() {
 	config_get auth_url main auth_url
 	config_get retry_delay main retry_delay 5
 	config_get retry_max main retry_max 300
+	config_get check_interval main check_interval 30
+	config_get check_url main check_url
+	config_get reconnect_mode main reconnect_mode off
+	config_get reconnect_time main reconnect_time 04:00
+	case "$reconnect_mode" in
+		off|daily) ;;
+		*) logger -t esurfing "Invalid reconnect_mode; expected off or daily"; return 1 ;;
+	esac
 
 	if [ -z "$device" ]; then
 		. /lib/functions/network.sh
@@ -32,7 +42,12 @@ start_service() {
 	# The executable validates ownership, permissions, bounds and URL pairing.
 	procd_open_instance main
 	procd_set_param command /usr/bin/esurfing --service --interface "$device" \
-		--credentials "$credentials" --retry-delay "$retry_delay" --retry-max "$retry_max"
+		--credentials "$credentials" --retry-delay "$retry_delay" --retry-max "$retry_max" \
+		--check-interval "$check_interval"
+	[ -z "$check_url" ] || procd_append_param command --check-url "$check_url"
+	case "$reconnect_mode" in
+		daily) procd_append_param command --reconnect-at "$reconnect_time" ;;
+	esac
 	[ -z "$gateway" ] || procd_append_param command --gateway "$gateway"
 	[ -z "$portal_url" ] || procd_append_param command --portal-url "$portal_url"
 	[ -z "$ticket_url" ] || procd_append_param command --ticket-url "$ticket_url"

@@ -124,14 +124,14 @@ static int retryable_http(Client *c, const Response *r)
     return 1;
 }
 
-static int http_request(Client *c, const char *url, const char *body, const char *id, Response *r)
+static int http_request(Client *c, const char *url, const char *body, const char *id, Response *r, int check)
 {
     char checked[URL_SIZE];
+    memset(r,0,sizeof(*r));
     if (resolve_url(checked,NULL,url)) return -1;
     CURL *curl=curl_easy_init();
     struct curl_slist *headers=NULL;
     int result=-1;
-    memset(r,0,sizeof(*r));
     if (!curl) return fail("Cannot initialize HTTP client");
 #define OPT(k,v) do { if (curl_easy_setopt(curl,k,v)!=CURLE_OK) { fail("Cannot configure HTTP client"); goto done; } } while (0)
 #define HEADER(v) do { struct curl_slist *next=curl_slist_append(headers,v); if (!next) { fail("Out of memory"); goto done; } headers=next; } while (0)
@@ -144,7 +144,7 @@ static int http_request(Client *c, const char *url, const char *body, const char
     OPT(CURLOPT_USERAGENT,USER_AGENT);
     OPT(CURLOPT_HTTP_VERSION,(long)CURL_HTTP_VERSION_1_1);
     OPT(CURLOPT_CONNECTTIMEOUT,10L);
-    OPT(CURLOPT_TIMEOUT,15L);
+    OPT(CURLOPT_TIMEOUT,check ? 10L : 15L);
     OPT(CURLOPT_NOSIGNAL,1L);
     OPT(CURLOPT_WRITEFUNCTION,receive_body);
     OPT(CURLOPT_WRITEDATA,r);
@@ -153,6 +153,7 @@ static int http_request(Client *c, const char *url, const char *body, const char
     /* Redirects are GET-only and handled explicitly by discover(). TLS verification
      * stays enabled; no environment proxies, cookies, verbose logs, or disk cache. */
     HEADER("Connection: close");
+    if (check) { HEADER("Cache-Control: no-cache, no-store"); HEADER("Pragma: no-cache"); }
     if (body) {
         unsigned char hash[16]; char hex[33], field[100];
         digest(body,strlen(body),hash,0); hex_encode(hash,16,hex,0);
@@ -186,6 +187,23 @@ done:
     return result;
 #undef OPT
 #undef HEADER
+}
+
+/* An authentication keepalive can succeed after Internet access has been lost.
+ * Probe through the same source address/device, without authentication headers,
+ * redirects or proxies. A portal's HTTP 200 login page is not an online result. */
+int check_connectivity(Client *c, const char *url)
+{
+    Response r;
+    int result=http_request(c,url,NULL,NULL,&r,1);
+    if (result) return result;
+    int online=(r.status==204 && r.n==0) ||
+        (r.status==200 && !memchr(r.body,0,r.n) &&
+         !strcmp(trim(r.body),"Microsoft Connect Test"));
+    if (!online)
+        snprintf(error_message,sizeof(error_message),"Connectivity probe returned unexpected HTTP %ld/body",r.status);
+    free(r.body);
+    return online ? 0 : RETRY_NETWORK;
 }
 
 /* Only a few direct response children are needed. Expat checks UTF-8, entities,
@@ -335,7 +353,7 @@ int discover(Client *c, const char *start)
     char current[URL_SIZE];
     if (resolve_url(current,NULL,start)) return -1;
     for (int step=0; step<12 && !stopping; step++) {
-        Response r; int result=http_request(c,current,NULL,NULL,&r);
+        Response r; int result=http_request(c,current,NULL,NULL,&r,0);
         if (result) return result;
         char ticket[URL_SIZE], auth[URL_SIZE], target[URL_SIZE]={0};
         if (r.status==200) {
@@ -375,7 +393,7 @@ int discover(Client *c, const char *start)
 
 static int post(Client *c, const char *url, const char *body, const char *id, Response *r, long *code)
 {
-    int result=http_request(c,url,body,id,r);
+    int result=http_request(c,url,body,id,r,0);
     if (result) return result;
     if (r->status!=200) {
         snprintf(error_message,sizeof(error_message),"Authentication endpoint returned HTTP %ld",r->status);

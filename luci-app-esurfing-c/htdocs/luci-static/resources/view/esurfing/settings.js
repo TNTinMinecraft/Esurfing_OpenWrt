@@ -134,6 +134,7 @@ return view.extend({
 		s.addremove = false;
 		s.tab('basic', '基本设置');
 		s.tab('retry', '自动重试');
+		s.tab('schedule', '定时重拨');
 		s.tab('advanced', '高级设置');
 		var o = s.taboption('basic', form.Flag, 'enabled', '启用服务', '保存应用会重新加载服务配置。');
 		o.rmempty = false;
@@ -142,6 +143,30 @@ return view.extend({
 		uci.sections('network', 'interface').forEach(function(section) {
 			if (section['.name'] != 'loopback') o.value(section['.name']);
 		});
+		o = s.taboption('schedule', form.ListValue, 'reconnect_mode', '定时重拨方式',
+			'注销旧会话后重新进行天翼校园认证，不重启 WAN。重拨期间会短暂断网；服务停止或账号错误暂停时不触发。');
+		o.value('off', '关闭'); o.value('daily', '每天固定时间');
+		o.default = 'off'; o.rmempty = false;
+		o = s.taboption('schedule', form.Value, 'reconnect_time', '每日时间',
+			'采用路由器系统时区，请确保时间同步正常。保存应用后按下一个时间点执行，精度约 30 秒。');
+		o.default = '04:00'; o.rmempty = false; o.depends('reconnect_mode', 'daily');
+		o.validate = function(section, value) {
+			return /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(value) || '请输入 HH:MM，例如 04:00。';
+		};
+		o = s.taboption('retry', form.Value, 'check_interval', '外网检测间隔（秒）',
+			'独立于认证保活。连续 3 次失败后自动重新登录；0 关闭，其他值为 10–86400 秒。');
+		o.default = '30'; o.rmempty = false; o.datatype = 'uinteger';
+		o.validate = function(section, value) {
+			return /^(0|[1-9][0-9]*)$/.test(value) &&
+				(Number(value) == 0 || (Number(value) >= 10 && Number(value) <= 86400)) ||
+				'请输入 0 或 10–86400 秒。';
+		};
+		o = s.taboption('retry', form.Value, 'check_url', '外网检测地址',
+			'留空使用 Microsoft Connect Test。自定义地址须返回空正文 HTTP 204，或 HTTP 200 且正文为 Microsoft Connect Test；不能填写普通网页。地址被屏蔽会误触发重连，请更换或关闭检测。');
+		o.placeholder = 'http://www.msftconnecttest.com/connecttest.txt';
+		o.validate = function(section, value) {
+			return validEndpoint(value) || '请输入有效的 HTTP/HTTPS 地址。';
+		};
 		o = s.taboption('retry', form.Value, 'retry_delay', '初始等待（秒）');
 		o.default = '5'; o.rmempty = false; o.datatype = 'range(1,86400)';
 		o = s.taboption('retry', form.Value, 'retry_max', '最长等待（秒）',
