@@ -357,17 +357,23 @@ int algorithm_load(Algorithm *a, const unsigned char *package, size_t n)
 {
     static const uint32_t keys[2][4]={{0x464b697c,0x463b6d4d,0x36496a5a,0x4774496f},
                                     {0x356d766d,0x52783633,0x2d4a4d38,0x39384335}};
-    /* Known templates use the exact fixed-width metadata envelope. */
-    if (n<=114 || n>MAX_PACKAGE || memcmp(package,"001",3) || package[3]!=64 || package[68]!=36)
+    /* Both strings are length-prefixed. Live servers also send 128 hex bytes
+     * of metadata; the UUID and LZMA header move with that field. */
+    if (n<=4 || n>MAX_PACKAGE || memcmp(package,"001",3))
         return fail("Unsupported AutoZSM envelope");
-    for (int i=4; i<68; i++) if (unhex(package[i])<0) return fail("Invalid AutoZSM metadata");
+    size_t metadata_size=package[3], uuid_offset=4+metadata_size;
+    if ((metadata_size!=64 && metadata_size!=128) || n<=uuid_offset || package[uuid_offset]!=36)
+        return fail("Unsupported AutoZSM metadata length");
+    size_t props_offset=uuid_offset+1+36, payload_offset=props_offset+9;
+    if (n<=payload_offset) return fail("Truncated AutoZSM envelope");
+    for (size_t i=4; i<uuid_offset; i++) if (unhex(package[i])<0) return fail("Invalid AutoZSM metadata");
     Algorithm next={0};
-    memcpy(next.id,package+69,36);
+    memcpy(next.id,package+uuid_offset+1,36);
     if (!valid_uuid(next.id)) return fail("Invalid algorithm UUID");
     for (int i=0; i<36; i++) next.id[i]=(char)tolower((unsigned char)next.id[i]);
-    uint32_t packed=get32(package+110,0), size=packed&0x0fffffff;
-    if ((packed>>28)!=2 || !size || size>MAX_PACKAGE || (n-114)%8) return fail("Invalid AutoZSM type/size");
-    unsigned prop=package[105], dict=get32(package+106,0);
+    uint32_t packed=get32(package+props_offset+5,0), size=packed&0x0fffffff;
+    if ((packed>>28)!=2 || !size || size>MAX_PACKAGE || (n-payload_offset)%8) return fail("Invalid AutoZSM type/size");
+    unsigned prop=package[props_offset], dict=get32(package+props_offset+1,0);
     lzma_options_lzma options={0};
     options.lc=prop%9; options.lp=(prop/9)%5; options.pb=prop/45;
     if (prop>=225 || options.lc+options.lp>4 || dict<4096 || dict>16*1024*1024) return fail("Unsupported LZMA properties");
@@ -375,10 +381,10 @@ int algorithm_load(Algorithm *a, const unsigned char *package, size_t n)
      * A size-delimited 64 KiB image never needs the advertised 16 MiB dictionary. */
     options.dict_size=dict<size ? dict : size;
     if (options.dict_size<4096) options.dict_size=4096;
-    size_t compressed_size=n-114;
+    size_t compressed_size=n-payload_offset;
     unsigned char *compressed=malloc(compressed_size), *image=calloc(1,size);
     if (!compressed || !image) { free(compressed); free(image); return fail("Out of memory"); }
-    memcpy(compressed,package+114,compressed_size);
+    memcpy(compressed,package+payload_offset,compressed_size);
     for (size_t i=0; i<compressed_size; i+=8) {
         tea_block(compressed+i,keys[0],1,0); tea_block(compressed+i,keys[1],1,0);
     }
