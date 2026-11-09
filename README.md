@@ -2,7 +2,7 @@
 
 江苏天翼校园 HTTP Portal 精简 C 客户端，提供 OpenWrt APK、macOS/Linux 可执行文件，以及可选的 LuCI 中文配置界面和协议分析。核心流程为门户发现、算法协商、获取 ticket、登录、定时保活、外网连通性检查、自动重连和注销。
 
-运行依赖为 libcurl、liblzma、libexpat；路由器不需要 Python 或 Node.js。支持已识别的双层 3DES-ECB、双层 3DES-CBC 和三层变体 TEA 模板，只解析算法包，不执行服务器下发的 DLL。
+运行依赖为 libcurl、liblzma、libexpat；路由器不需要 Python 或 Node.js。支持已识别的双层 3DES-ECB、双层 3DES-CBC、三层变体 TEA 和双层 AES-128-CBC 模板，只解析算法包，不执行服务器下发的 DLL。
 
 ## 目录
 
@@ -14,7 +14,7 @@
 | `scripts/build-openwrt.sh` | 使用 Linux OpenWrt SDK 构建核心 APK，可选构建 LuCI APK |
 | `scripts/build-native.sh` | 原生构建 macOS/Linux ARM64 和 x86_64 可执行文件 |
 | `.github/workflows/release-apk.yml` | 手动构建 OpenWrt APK 和原生程序，发布到同一 Release |
-| `docs/protocol.md` | 协议证据、算法包结构、三种算法模板及 C 源码对应关系 |
+| `docs/protocol.md` | 协议证据、算法包结构、四种算法模板及 C 源码对应关系 |
 | `docs/install.md` | APK 安装、校验、LuCI 和服务配置 |
 | `docs/native.md` | macOS/Linux 可执行文件的运行库、校验与使用说明 |
 | `docs/building.md` | 本地构建及手动发布说明 |

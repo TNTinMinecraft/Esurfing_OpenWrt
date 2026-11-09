@@ -8,7 +8,7 @@ SOURCES = src/network.c src/main.c src/protocol.c src/crypto.c
 
 all: esurfing
 
-esurfing: $(SOURCES) src/esurfing.h src/des_tables.h
+esurfing: $(SOURCES) src/esurfing.h src/des_tables.h src/aes.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $(SOURCES) $(LDLIBS)
 
 clean:

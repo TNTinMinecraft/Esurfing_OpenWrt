@@ -235,7 +235,7 @@ static int run_client(const Client *configuration, const char *path, const char 
         if (stopping || reconnecting) goto session_done;
         if ((result=negotiate(c))) goto session_done;
         if (stopping || reconnecting) goto session_done;
-        puts(c->algorithm.tea ? "Algorithm: triple modified TEA" :
+        puts(c->algorithm.aes ? "Algorithm: double AES-128-CBC" : c->algorithm.tea ? "Algorithm: triple modified TEA" :
              c->algorithm.iv_length ? "Algorithm: double 3DES-CBC" : "Algorithm: double 3DES");
         /* File credentials are re-read on every new session, then wiped after
          * login. Interactive credentials stay in RAM only for reconnection. */

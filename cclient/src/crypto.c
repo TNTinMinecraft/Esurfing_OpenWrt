@@ -162,7 +162,7 @@ static uint64_t permute(uint64_t x, const unsigned char *table, int n, int bits)
 
 void algorithm_init(Algorithm *a, const unsigned char key[48], int tea)
 {
-    a->tea=tea;
+    a->tea=tea; a->aes=0;
     a->iv_length=0;
     memset(a->iv,0,sizeof(a->iv));
     if (tea) {
@@ -199,6 +199,8 @@ static void des_block(unsigned char block[8], const uint64_t keys[16], int rever
     put32(block,(uint32_t)(v>>32),1); put32(block+4,(uint32_t)v,1);
 }
 
+#include "aes.h"
+
 static void transform(const Algorithm *a, unsigned char *raw, size_t n, int decrypt)
 {
     static const int order[2][6]={{3,4,5,0,1,2},{2,1,0,5,4,3}};
@@ -232,13 +234,16 @@ static void transform(const Algorithm *a, unsigned char *raw, size_t n, int decr
 
 char *encrypt_xml(const Algorithm *a, const char *xml)
 {
-    size_t len=strlen(xml), n=(len/8+1)*8;
+    size_t len=strlen(xml), block=a->aes?16:8, n=(len/block+1)*block;
+    size_t capacity=n+(a->aes?32:0);
     if (len>MAX_XML) { fail("Request XML too large"); return NULL; }
-    unsigned char *raw=calloc(1,n);
-    char *out=malloc(n*2+1);
+    unsigned char *raw=calloc(1,capacity);
+    char *out=malloc(capacity*2+1);
     if (!raw || !out) { free(raw); free(out); fail("Out of memory"); return NULL; }
     memcpy(raw,xml,len);
-    transform(a,raw,n,0); hex_encode(raw,n,out,1);
+    if (a->aes) aes_transform(a,raw,&n,0);
+    else transform(a,raw,n,0);
+    hex_encode(raw,n,out,1);
     wipe(raw,n); free(raw);
     return out;
 }
@@ -253,7 +258,7 @@ static int unhex(unsigned char c)
 
 char *decrypt_xml(const Algorithm *a, const char *body, size_t n)
 {
-    if (!n || n>2*(MAX_XML+8) || n%16) { fail("Invalid encrypted XML length"); return NULL; }
+    if (!n || n>2*(MAX_XML+48) || n%(a->aes?32:16) || (a->aes && n<96)) { fail("Invalid encrypted XML length"); return NULL; }
     size_t allocated=n/2+1;
     unsigned char *raw=calloc(1,allocated);
     if (!raw) { fail("Out of memory"); return NULL; }
@@ -263,9 +268,10 @@ char *decrypt_xml(const Algorithm *a, const char *body, size_t n)
         raw[i/2]=(unsigned char)(l*16+r);
     }
     n/=2;
-    transform(a,raw,n,1);
+    if (a->aes) aes_transform(a,raw,&n,1);
+    else transform(a,raw,n,1);
     unsigned char *zero=memchr(raw,0,n);
-    if (!zero || (size_t)(raw+n-zero)>8) goto invalid;
+    if (!zero || (size_t)(raw+n-zero)>(a->aes?16u:8u)) goto invalid;
     for (unsigned char *p=zero; p<raw+n; p++) if (*p) goto invalid;
     raw[n]=0;
     return (char *)raw;
@@ -308,13 +314,15 @@ static const unsigned char *pe_read(const PE *pe, uint32_t rva, size_t n)
 
 static int load_image(Algorithm *a, const unsigned char *image, size_t n)
 {
-    static const char *hashes[3][2]={
+    static const char *hashes[4][2]={
         {"888c189c7d9ab436a124711524735b6c7ee810678bfa712a59777f1be6d549d1",
          "64764eb5c54a91844d6271f611ec84fe9a39ce8bccfa0ae528274d3db826bd58"},
         {"61c7ced307a0c1674a302cd986013720282e4dcdeb04f883e609be2a6e1aa41a",
          "aa38c3f635d92580f82a7b2f58e98181c80cb1518e7cef09870fa4081085869d"},
         {"ed61dfa149ee837b8c0a061ed09b9ca0be784d0cd1882e978f768ff1f3225c03",
-         "64567d9aaeb7aebe0a1f06d1c398a680894395158e06a00d56838528b775bfcd"}
+         "64567d9aaeb7aebe0a1f06d1c398a680894395158e06a00d56838528b775bfcd"},
+        {"9204eae3ad82effca7075dd39a561ca1e58814371286a2f4685418bbf6d0c78b",
+         "8c8be1dc1cd34e0285f4d22fc7dc18279953a94f2a6a8ab6ba9929a33f671da3"}
     };
     PE pe;
     if (pe_parse(&pe,image,n)) return fail("Invalid algorithm PE image");
@@ -325,9 +333,20 @@ static int load_image(Algorithm *a, const unsigned char *image, size_t n)
         if (index>=0) { unsigned char h[32]; digest(image+s->raw,s->size,h,1); hex_encode(h,32,actual[index],0); }
     }
     int template;
-    for (template=0; template<3; template++)
+    for (template=0; template<4; template++)
         if (!strcmp(actual[0],hashes[template][0]) && !strcmp(actual[1],hashes[template][1])) break;
-    if (template==3) return fail("Unsupported algorithm template");
+    if (template==4) return fail("Unsupported algorithm template");
+    if (template==3) {
+        const unsigned char *meta=pe_read(&pe,0x101d9,7);
+        if (!meta || meta[0]!=16 || meta[2]!=32 || meta[5]+32+16+7>256)
+            return fail("Unsupported AES key layout");
+        const unsigned char *key=pe_read(&pe,0x100e0+meta[5],48);
+        if (!key) return fail("AES key outside image");
+        a->aes=1; a->tea=0; a->iv_length=16;
+        aes_expand(a->aeskeys[0],key); aes_expand(a->aeskeys[1],key+16);
+        memcpy(a->iv,key+32,16);
+        return 0;
+    }
     int tea=template==1;
     if (!tea) {
         static const struct { uint32_t rva; const unsigned char *table; size_t n; } tables[]={

@@ -18,9 +18,10 @@
 
 typedef struct {
     char id[37];
-    int tea;
+    int tea, aes;
     int iv_length;
-    unsigned char iv[8];
+    unsigned char iv[16];
+    unsigned char aeskeys[2][176];
     uint32_t keys[3][4];
     uint64_t deskeys[6][16];
 } Algorithm;

@@ -9,7 +9,7 @@
 以下以 `ramips/mt7621` 的 `mipsel_24kc` 为例，在仅存放本次所需 APK 的目录执行，版本号和文件名以 Release 为准：
 
 ```sh
-core='esurfing-c-0.2.0-r4-ramips-mt7621-mipsel_24kc.apk'
+core='esurfing-c-0.2.0-r5-ramips-mt7621-mipsel_24kc.apk'
 luci='luci-app-esurfing-c-0.2.0-r5-noarch.apk'
 # 只校验已下载的文件；未安装 LuCI 时省略第二组命令
 awk -v file="$core" '$2 == file { print; found=1 } END { if (!found) exit 1 }' SHA256SUMS > core.sha256 && sha256sum -c core.sha256
